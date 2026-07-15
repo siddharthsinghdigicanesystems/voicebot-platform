@@ -1,0 +1,50 @@
+# =============================================================================
+# VoiceBot Platform — production reverse proxy (single domain)
+#
+# Caddy terminates TLS (auto Let's Encrypt) and routes one public domain to the
+# three back-end services by path:
+#
+#   /v1/telephony/tata   -> bridge   (Tata SmartFlo WSS audio stream)
+#   /v1/*                -> api       (webhooks, REST, dashboard live-transcript WS)
+#   /*                   -> frontend  (dashboard SPA)
+#
+# DOMAIN and ACME_EMAIL are injected from the environment (see
+# docker-compose.prod.yml). For a bare `caddy run` you can export them, or
+# replace the placeholders with literals.
+#
+# Upstreams use the docker-compose service names (bridge/api/frontend), which
+# resolve when Caddy runs on the same compose network. If you run Caddy on the
+# host instead, swap them for 127.0.0.1:<published-port>.
+# =============================================================================
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	# --- Tata SmartFlo WSS endpoint -----------------------------------------
+	# Only the canonical path is routed to the bridge. We deliberately do NOT
+	# map the bridge's "/" and "/websocket" aliases here so they can't collide
+	# with the dashboard SPA. Configure Tata with the full path below.
+	handle /v1/telephony/tata {
+		reverse_proxy bridge:8080 {
+			# long-lived audio stream: flush every frame, never buffer
+			flush_interval -1
+			transport http {
+				read_timeout 1h
+				write_timeout 1h
+			}
+		}
+	}
+
+	# --- API: webhooks, REST, live-transcript WS ----------------------------
+	handle /v1/* {
+		reverse_proxy api:8000 {
+			flush_interval -1
+		}
+	}
+
+	# --- Dashboard SPA ------------------------------------------------------
+	handle {
+		reverse_proxy frontend:80
+	}
+}

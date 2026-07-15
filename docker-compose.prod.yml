@@ -1,0 +1,40 @@
+# =============================================================================
+# VoiceBot Platform — production override
+#
+# Adds a Caddy reverse proxy (TLS termination + single-domain routing) in front
+# of api / bridge / frontend. Use together with the base compose file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Required env (in .env):
+#   DOMAIN=voice.yourcompany.com
+#   ACME_EMAIL=ops@yourcompany.com
+#
+# Caddy fetches and renews Let's Encrypt certs automatically; they persist in
+# the `caddy-data` volume across restarts. Only Caddy publishes host ports 80
+# and 443 — see the note below about closing the back-end ports.
+# =============================================================================
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+      - bridge
+      - frontend
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3 (QUIC)
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data      # certs + ACME account (persist across restarts)
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:

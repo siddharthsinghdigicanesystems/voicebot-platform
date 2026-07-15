@@ -1,0 +1,174 @@
+# =============================================================================
+# VoiceBot Platform — local development stack
+# `docker compose up --build` starts everything.
+# =============================================================================
+
+x-env-base: &env-base
+  ENV: ${ENV:-development}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  TZ: ${TZ:-Asia/Kolkata}
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-voicebot}
+      POSTGRES_USER: ${POSTGRES_USER:-voicebot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voicebot_dev_pw_change_me}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *env-base
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_ACCESS_TOKEN_TTL_SECONDS: ${JWT_ACCESS_TOKEN_TTL_SECONDS:-3600}
+      SERVICE_TOKEN: ${SERVICE_TOKEN}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      TATA_WEBHOOK_SECRET: ${TATA_WEBHOOK_SECRET}
+      FRONTEND_PUBLIC_URL: ${FRONTEND_PUBLIC_URL:-http://localhost:5173}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz', timeout=2).status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  bridge:
+    build:
+      context: ./services/bridge
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *env-base
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_REALTIME_MODEL: ${OPENAI_REALTIME_MODEL:-gpt-realtime-2025-08-28}
+      OPENAI_VOICE: ${OPENAI_VOICE:-alloy}
+      OPENAI_REALTIME_URL: ${OPENAI_REALTIME_URL:-wss://api.openai.com/v1/realtime}
+      AUDIO_FORMAT: ${AUDIO_FORMAT:-g711_ulaw}
+      AUDIO_SAMPLE_RATE: ${AUDIO_SAMPLE_RATE:-8000}
+      TELEPHONY_ADAPTER: ${TELEPHONY_ADAPTER:-mock}
+      TATA_STREAMING_AUTH_TOKEN: ${TATA_STREAMING_AUTH_TOKEN}
+      API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000}
+      SERVICE_TOKEN: ${SERVICE_TOKEN}
+      REDIS_URL: ${REDIS_URL}
+      ENABLE_RECORDINGS: ${ENABLE_RECORDINGS:-false}
+      ENABLE_LIVE_TRANSCRIPT_PUBSUB: ${ENABLE_LIVE_TRANSCRIPT_PUBSUB:-true}
+      RECORDINGS_BACKEND: ${RECORDINGS_BACKEND:-disk}
+      RECORDINGS_DIR: ${RECORDINGS_DIR:-/app/recordings}
+      RECORDINGS_S3_BUCKET: ${RECORDINGS_S3_BUCKET:-}
+      RECORDINGS_S3_PREFIX: ${RECORDINGS_S3_PREFIX:-calls}
+      RECORDINGS_S3_REGION: ${RECORDINGS_S3_REGION:-}
+      RECORDINGS_S3_KMS_KEY_ID: ${RECORDINGS_S3_KMS_KEY_ID:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-}
+      MAX_CALL_DURATION_SECONDS: ${MAX_CALL_DURATION_SECONDS:-600}
+      CALLER_SILENCE_TIMEOUT_SECONDS: ${CALLER_SILENCE_TIMEOUT_SECONDS:-30}
+      CALLER_INITIAL_SILENCE_TIMEOUT_SECONDS: ${CALLER_INITIAL_SILENCE_TIMEOUT_SECONDS:-45}
+    volumes:
+      - ./recordings:/app/recordings
+    ports:
+      - "8080:8080"   # WebSocket: telephony provider connects here
+      - "9090:9090"   # Prometheus metrics
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:9090/healthz', timeout=2).status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    build:
+      context: ./services/worker
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *env-base
+      REDIS_URL: ${REDIS_URL}
+      API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000}
+      SERVICE_TOKEN: ${SERVICE_TOKEN}
+      TATA_API_KEY: ${TATA_API_KEY}
+      TATA_API_BASE_URL: ${TATA_API_BASE_URL:-https://api-smartflo.tatateleservices.com}
+      TATA_OUTBOUND_CALLER_ID: ${TATA_OUTBOUND_CALLER_ID}
+      BRIDGE_PUBLIC_WS_URL: ${BRIDGE_PUBLIC_WS_URL:-ws://bridge:8080}
+      SWEEP_STALE_OLDER_THAN_SECONDS: ${SWEEP_STALE_OLDER_THAN_SECONDS:-720}
+
+  mock_telephony:
+    build:
+      context: ./services/mock_telephony
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      bridge:
+        condition: service_healthy
+    environment:
+      <<: *env-base
+      # The browser (running on the host) connects to the bridge directly,
+      # so this URL must be reachable from the host, not just the docker network.
+      BRIDGE_PUBLIC_WS_URL: ${BRIDGE_PUBLIC_WS_URL:-ws://localhost:8080/v1/telephony/tata}
+    ports:
+      - "8081:8081"   # Browser-mic demo page
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${API_PUBLIC_URL:-http://localhost:8000}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "5173:80"
+
+volumes:
+  postgres-data:
+  redis-data:

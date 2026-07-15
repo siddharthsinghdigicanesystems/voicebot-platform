@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>VoiceBot — local demo (no Tata account needed)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b1020;
+    --card: #131a35;
+    --fg: #e6ecff;
+    --muted: #8a93b6;
+    --accent: #5b8cff;
+    --accent-2: #00d4a8;
+    --danger: #ff6b6b;
+    --border: #1f2851;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(ellipse at top, #1a2554 0%, var(--bg) 60%);
+    color: var(--fg);
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .card {
+    width: 100%; max-width: 560px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 28px 28px 24px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  }
+  h1 { margin: 0 0 4px; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 13px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 6px; }
+  input {
+    width: 100%; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: #0d1430; color: var(--fg);
+    font-size: 14px; outline: none;
+  }
+  input:focus { border-color: var(--accent); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .actions { display: flex; gap: 8px; margin-top: 18px; }
+  button {
+    padding: 11px 16px; border-radius: 10px; border: 0; cursor: pointer;
+    background: var(--accent); color: white; font-size: 14px; font-weight: 600;
+    transition: transform 0.04s, opacity 0.2s;
+  }
+  button:hover { opacity: 0.92; }
+  button:active { transform: translateY(1px); }
+  button.secondary { background: #2a3160; }
+  button.danger { background: var(--danger); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .status {
+    margin-top: 20px; padding: 12px 14px; border-radius: 10px;
+    background: #0d1430; border: 1px solid var(--border);
+    font-size: 13px; color: var(--muted);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.live { background: var(--accent-2); box-shadow: 0 0 12px var(--accent-2); animation: pulse 1.4s infinite; }
+  .dot.error { background: var(--danger); }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }
+  .meter {
+    height: 6px; background: #0d1430; border: 1px solid var(--border);
+    border-radius: 3px; overflow: hidden; margin-top: 14px;
+  }
+  .meter > div { height: 100%; width: 0%; background: var(--accent-2); transition: width 0.08s linear; }
+  .log {
+    margin-top: 16px; padding: 12px; background: #0a0f24; border-radius: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; color: var(--muted); max-height: 200px; overflow-y: auto;
+    border: 1px solid var(--border); white-space: pre-wrap; word-break: break-word;
+  }
+  .log .l-info { color: var(--fg); }
+  .log .l-bot { color: var(--accent-2); }
+  .log .l-user { color: var(--accent); }
+  .log .l-err { color: var(--danger); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .hint code { background: #0d1430; padding: 1px 6px; border-radius: 4px; font-size: 11px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Talk to the bot</h1>
+    <p class="sub">Local demo — no Tata account required. Speaks the same WebSocket protocol the bridge uses for production.</p>
+
+    <div class="row">
+      <div>
+        <label>Direction</label>
+        <select id="direction" style="width:100%;padding:10px;border-radius:8px;background:#0d1430;color:var(--fg);border:1px solid var(--border);">
+          <option value="inbound">inbound (caller → bot)</option>
+          <option value="outbound">outbound (bot calls you)</option>
+        </select>
+      </div>
+      <div>
+        <label>Your "phone" (used for CRM lookup)</label>
+        <input id="from" value="+911234567890" />
+      </div>
+    </div>
+
+    <label>Bridge WebSocket URL</label>
+    <input id="ws_url" />
+
+    <div class="actions">
+      <button id="startBtn">Start call</button>
+      <button id="stopBtn" class="danger" disabled>End call</button>
+    </div>
+
+    <div class="status">
+      <span class="dot" id="dot"></span>
+      <span id="statusText">idle</span>
+    </div>
+
+    <div class="meter"><div id="micLevel"></div></div>
+
+    <div class="log" id="log"></div>
+
+    <p class="hint">Tip: open the dashboard at <code>http://localhost:5173</code> to watch the transcript appear live.</p>
+  </div>
+
+<script>
+(async function() {
+  const cfg = await fetch('/config.json').then(r => r.json()).catch(() => ({}));
+  document.getElementById('ws_url').value = cfg.bridge_ws_url || 'ws://localhost:8080/v1/telephony/tata';
+
+  const $ = (id) => document.getElementById(id);
+  const startBtn = $('startBtn'), stopBtn = $('stopBtn'), statusText = $('statusText'), dot = $('dot');
+  const log = $('log');
+  const micLevel = $('micLevel');
+
+  let ws = null, audioCtx = null, sourceNode = null, processor = null;
+  let micStream = null, playbackQueue = [], playbackTime = 0;
+  let streamSid = null, isLive = false;
+
+  function logLine(text, cls = 'l-info') {
+    const span = document.createElement('span');
+    span.className = cls;
+    span.textContent = `[${new Date().toLocaleTimeString()}] ${text}\n`;
+    log.appendChild(span);
+    log.scrollTop = log.scrollHeight;
+  }
+  function setStatus(text, kind = 'idle') {
+    statusText.textContent = text;
+    dot.className = 'dot ' + (kind === 'live' ? 'live' : kind === 'error' ? 'error' : '');
+  }
+
+  // ---- μ-law codec (PCM16 <-> μ-law) ----
+  // Standard G.711 μ-law per ITU-T G.711.
+  function pcm16ToMulaw(s) {
+    const BIAS = 0x84, CLIP = 32635;
+    let sign = (s >> 8) & 0x80;
+    if (sign) s = -s;
+    if (s > CLIP) s = CLIP;
+    s = s + BIAS;
+    let exponent = 7;
+    for (let mask = 0x4000; (s & mask) === 0 && exponent > 0; exponent--, mask >>= 1) {}
+    const mantissa = (s >> ((exponent === 0) ? 4 : (exponent + 3))) & 0x0F;
+    return ~(sign | (exponent << 4) | mantissa) & 0xFF;
+  }
+  function mulawToPcm16(u) {
+    u = ~u & 0xFF;
+    const sign = u & 0x80;
+    const exponent = (u >> 4) & 0x07;
+    const mantissa = u & 0x0F;
+    let sample = ((mantissa << 3) + 0x84) << exponent;
+    sample -= 0x84;
+    return sign ? -sample : sample;
+  }
+
+  // ---- audio resample (browser is 48k, wire is 8k) ----
+  function downsampleTo8k(input, inRate) {
+    const ratio = inRate / 8000;
+    const outLen = Math.floor(input.length / ratio);
+    const out = new Int16Array(outLen);
+    for (let i = 0, j = 0; i < outLen; i++, j += ratio) {
+      const idx = j | 0;
+      let s = input[idx];
+      // soft clip to int16
+      s = Math.max(-1, Math.min(1, s));
+      out[i] = (s < 0 ? s * 0x8000 : s * 0x7FFF) | 0;
+    }
+    return out;
+  }
+
+  function b64FromBytes(bytes) {
+    let s = '';
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  }
+  function bytesFromB64(b64) {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  async function start() {
+    if (isLive) return;
+    startBtn.disabled = true;
+    setStatus('connecting…');
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+    } catch (e) {
+      setStatus('mic permission denied', 'error');
+      startBtn.disabled = false;
+      logLine(`mic error: ${e.message}`, 'l-err');
+      return;
+    }
+
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    sourceNode = audioCtx.createMediaStreamSource(micStream);
+    // 4096-sample buffer at e.g. 48k = ~85ms; we resample down to 8k inside.
+    processor = audioCtx.createScriptProcessor(4096, 1, 1);
+    sourceNode.connect(processor);
+    processor.connect(audioCtx.destination);
+
+    const url = $('ws_url').value;
+    ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      streamSid = 'MOCK-' + Math.random().toString(36).slice(2, 10);
+      const startEvt = {
+        event: 'start',
+        sequenceNumber: '1',
+        start: {
+          streamSid,
+          callSid: streamSid,
+          accountSid: 'MOCK',
+          tracks: ['inbound'],
+          mediaFormat: { encoding: 'audio/x-mulaw', sampleRate: 8000, channels: 1 },
+          customParameters: {
+            direction: $('direction').value,
+            from: $('from').value,
+            to: '+911140000000',
+          },
+        },
+      };
+      ws.send(JSON.stringify({ event: 'connected', protocol: 'Call', version: '0.2.0' }));
+      ws.send(JSON.stringify(startEvt));
+      isLive = true;
+      stopBtn.disabled = false;
+      setStatus('live — speak now', 'live');
+      logLine(`WS open, streamSid=${streamSid}`, 'l-info');
+    };
+
+    ws.onmessage = (e) => {
+      let evt;
+      try { evt = JSON.parse(e.data); } catch { return; }
+      if (evt.event === 'media') {
+        playMulawFrame(bytesFromB64(evt.media.payload));
+      } else if (evt.event === 'clear') {
+        playbackQueue.length = 0;
+        playbackTime = audioCtx.currentTime;
+        logLine('bot interrupted (clear)', 'l-info');
+      } else if (evt.event === 'mark') {
+        // bridge marks; ignore for the demo
+      }
+    };
+
+    ws.onerror = () => {
+      setStatus('connection error', 'error');
+      logLine('ws error', 'l-err');
+    };
+
+    ws.onclose = () => {
+      cleanup();
+      setStatus('disconnected');
+      logLine('ws closed');
+    };
+
+    // Mic loop -> WS
+    processor.onaudioprocess = (e) => {
+      if (!isLive || !ws || ws.readyState !== 1) return;
+      const buf = e.inputBuffer.getChannelData(0);
+      const pcm8k = downsampleTo8k(buf, audioCtx.sampleRate);
+
+      // VU meter
+      let peak = 0;
+      for (let i = 0; i < buf.length; i++) {
+        const v = Math.abs(buf[i]);
+        if (v > peak) peak = v;
+      }
+      micLevel.style.width = Math.min(100, peak * 200) + '%';
+
+      // Encode to μ-law and send in ~20ms frames (160 samples each at 8k)
+      const FRAME = 160;
+      for (let off = 0; off < pcm8k.length; off += FRAME) {
+        const slice = pcm8k.subarray(off, off + FRAME);
+        if (slice.length < FRAME) break;  // drop runt at end of buffer
+        const out = new Uint8Array(FRAME);
+        for (let i = 0; i < FRAME; i++) out[i] = pcm16ToMulaw(slice[i]);
+        ws.send(JSON.stringify({
+          event: 'media',
+          streamSid,
+          media: { track: 'inbound', payload: b64FromBytes(out) },
+        }));
+      }
+    };
+  }
+
+  function playMulawFrame(mulawBytes) {
+    if (!audioCtx) return;
+    const pcm = new Float32Array(mulawBytes.length);
+    for (let i = 0; i < mulawBytes.length; i++) pcm[i] = mulawToPcm16(mulawBytes[i]) / 32768;
+
+    const ab = audioCtx.createBuffer(1, pcm.length, 8000);
+    ab.copyToChannel(pcm, 0);
+    const src = audioCtx.createBufferSource();
+    src.buffer = ab;
+    src.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+    if (playbackTime < now) playbackTime = now;
+    src.start(playbackTime);
+    playbackTime += ab.duration;
+    playbackQueue.push(src);
+    src.onended = () => {
+      const i = playbackQueue.indexOf(src);
+      if (i !== -1) playbackQueue.splice(i, 1);
+    };
+  }
+
+  function stop() {
+    if (!isLive) return;
+    if (ws && ws.readyState === 1) {
+      try {
+        ws.send(JSON.stringify({ event: 'stop', stop: { streamSid }, sequenceNumber: 'final' }));
+      } catch {}
+      ws.close();
+    }
+    cleanup();
+    setStatus('idle');
+  }
+
+  function cleanup() {
+    isLive = false;
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    micLevel.style.width = '0%';
+    if (processor) { try { processor.disconnect(); } catch {} processor = null; }
+    if (sourceNode) { try { sourceNode.disconnect(); } catch {} sourceNode = null; }
+    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    if (audioCtx) { audioCtx.close(); audioCtx = null; }
+    playbackQueue.forEach(s => { try { s.stop(); } catch {} });
+    playbackQueue.length = 0;
+    playbackTime = 0;
+    streamSid = null;
+  }
+
+  startBtn.onclick = start;
+  stopBtn.onclick = stop;
+  window.addEventListener('beforeunload', stop);
+})();
+</script>
+</body>
+</html>
