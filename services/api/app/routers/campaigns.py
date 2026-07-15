@@ -115,7 +115,7 @@ async def create_campaign(
 @router.get("", response_model=list[CampaignOut])
 async def list_campaigns(
     session: AsyncSession = Depends(get_session),
-    _: Principal = Depends(require_user),
+    _: Principal = Depends(require_user_or_service),
 ) -> list[dict[str, Any]]:
     campaigns = (
         await session.execute(select(Campaign).order_by(Campaign.created_at.desc()))
