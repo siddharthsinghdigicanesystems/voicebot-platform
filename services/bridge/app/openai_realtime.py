@@ -107,8 +107,10 @@ class OpenAIRealtimeClient:
         We use server-side VAD by default — OpenAI does the speech-end detection
         and emits `response.create` automatically when the caller stops talking.
         """
-        # `modalities` is retained as a param for callers; GA uses output_modalities.
-        _ = modalities
+        # GA dropped `temperature` and renamed `modalities` → `output_modalities`.
+        # Keep the kwargs so callers don't break; sending temperature rejects the
+        # entire session.update (unknown_parameter).
+        _ = modalities, temperature
         in_fmt = _ga_audio_format(input_audio_format, sample_rate=settings.audio_sample_rate)
         out_fmt = _ga_audio_format(output_audio_format, sample_rate=settings.audio_sample_rate)
         await self._send(
@@ -121,7 +123,6 @@ class OpenAIRealtimeClient:
                     "output_modalities": ["audio"],
                     "tools": tools,
                     "tool_choice": "auto" if tools else "none",
-                    "temperature": temperature,
                     "audio": {
                         "input": {
                             "format": in_fmt,
