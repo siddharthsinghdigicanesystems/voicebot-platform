@@ -25,4 +25,5 @@ USER bridge
 
 EXPOSE 8080 9090
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--ws-ping-interval", "20", "--ws-ping-timeout", "20", "--log-config", "app/log_config.json"]
+# Honor $PORT (Render/Railway); fall back to 8080 for local compose.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --ws-ping-interval 20 --ws-ping-timeout 20 --log-config app/log_config.json"]
