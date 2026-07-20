@@ -28,6 +28,16 @@ from app.logging_setup import get_logger
 log = get_logger(__name__)
 
 
+def _ga_audio_format(fmt: str, *, sample_rate: int = 8000) -> dict[str, Any]:
+    """Map our wire format names to the GA Realtime `audio.*.format` object."""
+    if fmt == "g711_ulaw":
+        return {"type": "audio/pcmu"}
+    if fmt == "g711_alaw":
+        return {"type": "audio/pcma"}
+    # pcm16
+    return {"type": "audio/pcm", "rate": sample_rate}
+
+
 class OpenAIRealtimeClient:
     """One client = one WebSocket = one Realtime session."""
 
@@ -48,9 +58,10 @@ class OpenAIRealtimeClient:
 
     async def connect(self) -> None:
         url = f"{self.base_url}?model={self.model}"
+        # GA Realtime: Authorization only. Do NOT send OpenAI-Beta: realtime=v1
+        # — that selects the retired beta wire protocol (beta_api_shape_disabled).
         headers = [
             ("Authorization", f"Bearer {self.api_key}"),
-            ("OpenAI-Beta", "realtime=v1"),
         ]
         log.info("openai.connect", model=self.model)
         # Explicitly use the new asyncio client (websockets>=13). The top-level
@@ -91,31 +102,43 @@ class OpenAIRealtimeClient:
         modalities: list[str] | None = None,
         turn_detection: dict[str, Any] | None = None,
     ) -> None:
-        """Send the initial `session.update` event.
+        """Send the initial GA `session.update` event.
 
         We use server-side VAD by default — OpenAI does the speech-end detection
         and emits `response.create` automatically when the caller stops talking.
         """
+        # `modalities` is retained as a param for callers; GA uses output_modalities.
+        _ = modalities
+        in_fmt = _ga_audio_format(input_audio_format, sample_rate=settings.audio_sample_rate)
+        out_fmt = _ga_audio_format(output_audio_format, sample_rate=settings.audio_sample_rate)
         await self._send(
             {
                 "type": "session.update",
                 "session": {
-                    "modalities": modalities or ["text", "audio"],
+                    "type": "realtime",
+                    "model": self.model,
                     "instructions": instructions,
-                    "voice": voice,
-                    "input_audio_format": input_audio_format,
-                    "output_audio_format": output_audio_format,
-                    "input_audio_transcription": {"model": "whisper-1"},
-                    "turn_detection": turn_detection
-                    or {
-                        "type": "server_vad",
-                        "threshold": 0.5,
-                        "prefix_padding_ms": 300,
-                        "silence_duration_ms": 500,
-                    },
+                    "output_modalities": ["audio"],
                     "tools": tools,
                     "tool_choice": "auto" if tools else "none",
                     "temperature": temperature,
+                    "audio": {
+                        "input": {
+                            "format": in_fmt,
+                            "transcription": {"model": "whisper-1"},
+                            "turn_detection": turn_detection
+                            or {
+                                "type": "server_vad",
+                                "threshold": 0.5,
+                                "prefix_padding_ms": 300,
+                                "silence_duration_ms": 500,
+                            },
+                        },
+                        "output": {
+                            "format": out_fmt,
+                            "voice": voice,
+                        },
+                    },
                 },
             }
         )

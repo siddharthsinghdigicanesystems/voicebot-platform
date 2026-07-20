@@ -5,7 +5,7 @@ One `Session.run()` per call. Three asyncio tasks fan out:
   caller_to_bot  : reads μ-law frames from the telephony adapter, forwards
                    to OpenAI Realtime as input_audio_buffer.append.
   bot_to_caller  : reads events from OpenAI, dispatches:
-                       response.audio.delta     -> telephony.send_audio
+                       response.output_audio.delta -> telephony.send_audio
                        function_call_arguments  -> tools.dispatch + submit
                        speech_started           -> barge-in: cancel + clear
                        transcripts              -> persist + (optional) pubsub
@@ -385,7 +385,8 @@ class Session:
     async def _handle_openai_event(self, event: dict[str, Any]) -> None:
         etype = event.get("type", "")
 
-        if etype == "response.audio.delta":
+        # GA renamed several response.* events; accept both names during migration.
+        if etype in ("response.output_audio.delta", "response.audio.delta"):
             await self._handle_audio_delta(event)
         elif etype == "input_audio_buffer.speech_started":
             await self._handle_user_started_speaking()
@@ -393,13 +394,16 @@ class Session:
             self._caller_speech_ended_at = time.monotonic()
         elif etype == "conversation.item.input_audio_transcription.completed":
             await self._handle_user_transcript(event)
-        elif etype == "response.audio_transcript.done":
+        elif etype in (
+            "response.output_audio_transcript.done",
+            "response.audio_transcript.done",
+        ):
             await self._handle_bot_transcript(event)
         elif etype == "response.function_call_arguments.delta":
             self._accumulate_function_call(event)
         elif etype == "response.function_call_arguments.done":
             await self._handle_function_call_done(event)
-        elif etype == "response.audio.done":
+        elif etype in ("response.output_audio.done", "response.audio.done"):
             # The model finished streaming a full audio turn; tag the tail with
             # a mark so Smartflo tells us when the caller has actually heard it.
             await self._send_playback_mark()

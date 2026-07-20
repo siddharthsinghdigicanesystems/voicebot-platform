@@ -106,7 +106,7 @@ def _make_session() -> tuple[Session, _FakeAdapter, _ScriptedOpenAI]:
 
 def _audio_delta_b64(payload: bytes) -> dict[str, Any]:
     return {
-        "type": "response.audio.delta",
+        "type": "response.output_audio.delta",
         "delta": base64.b64encode(payload).decode("ascii"),
     }
 
@@ -140,7 +140,7 @@ async def test_wrap_up_waits_for_post_tool_response_done() -> None:
         {"type": "response.created"},  # NEW response from submit_tool_result
         _audio_delta_b64(goodbye_audio_1),
         _audio_delta_b64(goodbye_audio_2),
-        {"type": "response.audio.done"},
+        {"type": "response.output_audio.done"},
         {"type": "response.done"},  # NEW response done → wrap up
     ]
     s.openai = _ScriptedOpenAI(script)  # type: ignore[assignment]
