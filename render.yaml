@@ -100,8 +100,11 @@ services:
         value: tata
       - key: TATA_STREAMING_AUTH_TOKEN
         sync: false
+      # Free web services cannot RECEIVE private-network traffic, so the
+      # compose-style http://voicebot-api:8000 DNS name fails with
+      # "Name or service not known". Use the api's public https URL instead.
       - key: API_INTERNAL_URL
-        value: http://voicebot-api:8000
+        sync: false # e.g. https://voicebot-api.onrender.com
       - key: REDIS_URL
         fromService:
           type: keyvalue

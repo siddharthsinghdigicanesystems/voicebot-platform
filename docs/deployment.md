@@ -60,7 +60,7 @@ The repo ships a [`render.yaml`](../render.yaml) Blueprint configured for **$0 t
 
 How it wires together:
 
-- **Secrets are prompted once.** Only `OPENAI_API_KEY`, `TATA_WEBHOOK_SECRET`, and `TATA_STREAMING_AUTH_TOKEN` are `sync: false`. Tata values can be placeholders (`test`) for now. `SERVICE_TOKEN`, `JWT_SECRET`, and `ADMIN_PASSWORD` are auto-generated — grab the admin password from the api Environment tab.
+- **Secrets are prompted once.** `OPENAI_API_KEY`, `TATA_*`, and `API_INTERNAL_URL` are `sync: false`. Set `API_INTERNAL_URL` to the api's **public** HTTPS URL (e.g. `https://voicebot-api.onrender.com`) — free web services cannot receive private-network calls, so `http://voicebot-api:8000` will fail with DNS errors. Tata values can be placeholders for now. `SERVICE_TOKEN`, `JWT_SECRET`, and `ADMIN_PASSWORD` are auto-generated — grab the admin password from the api Environment tab.
 - **Managed Postgres/Redis are auto-linked** via `fromDatabase` / `fromService`. The api normalizes Render's `postgresql://` string to `+asyncpg` (see `services/api/app/config.py`).
 - **`$PORT` binding**: api/bridge pin `PORT` to `8000`/`8080` so the private URL `http://voicebot-api:8000` is stable.
 - `mock_telephony` and the dashboard frontend are excluded — local / later add-ons only.
