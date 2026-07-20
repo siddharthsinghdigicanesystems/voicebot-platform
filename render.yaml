@@ -1,20 +1,18 @@
 # =============================================================================
-# VoiceBot Platform — Render Blueprint (FREE testing stack)
+# VoiceBot Platform — Render Blueprint (FREE testing stack, no frontend)
 #
 # One-click deploy: New + > Blueprint > pick this repo.
 #
-# This Blueprint is intentionally $0 for the testing phase:
-#   - All web services use plan: free
+# $0 testing stack:
+#   - voicebot-api + voicebot-bridge (plan: free)
 #   - Free Postgres + free Key Value (Redis)
+#   - No frontend (dashboard not needed for telephony/API testing)
 #   - No background worker (Render workers have no free tier)
 #
-# Trade-offs (acceptable for testing, not for live telephony):
+# Trade-offs:
 #   - Free web services spin down after ~15 min idle → cold start ~30–60s
-#   - Outbound campaigns won't dial (no worker). Dashboard / API / bridge still work.
-#   - Free Postgres is deleted after 30 days — export before then.
-#
-# When you're ready for paid/production: change plan: free → starter on the
-# services you need warm, and add the worker block back (see docs/deployment.md).
+#   - Outbound campaigns won't dial (no worker)
+#   - Free Postgres is deleted after 30 days
 # =============================================================================
 
 envVarGroups:
@@ -45,7 +43,7 @@ services:
     ipAllowList: []
 
   # ---------------------------------------------------------------------------
-  # API — REST, auth, webhooks, dashboard WS. Runs DB migrations on boot.
+  # API — REST, auth, webhooks. Runs DB migrations on boot.
   # ---------------------------------------------------------------------------
   - type: web
     name: voicebot-api
@@ -75,8 +73,9 @@ services:
         generateValue: true
       - key: TATA_WEBHOOK_SECRET
         sync: false
+      # No dashboard in this stack; CORS origin unused but required by the API.
       - key: FRONTEND_PUBLIC_URL
-        sync: false
+        value: https://localhost
 
   # ---------------------------------------------------------------------------
   # Bridge — OpenAI Realtime audio. Free tier will cold-start; fine for demos.
@@ -109,17 +108,3 @@ services:
           property: connectionString
       - key: ENABLE_LIVE_TRANSCRIPT_PUBSUB
         value: "true"
-
-  # ---------------------------------------------------------------------------
-  # Frontend — Vite SPA (nginx). Rebuild after setting VITE_API_URL.
-  # ---------------------------------------------------------------------------
-  - type: web
-    name: voicebot-frontend
-    runtime: docker
-    rootDir: frontend
-    region: singapore
-    plan: free
-    healthCheckPath: /
-    envVars:
-      - key: VITE_API_URL
-        sync: false

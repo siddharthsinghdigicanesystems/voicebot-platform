@@ -42,7 +42,7 @@ Caddy is the only container that should publish host ports (`80`/`443`). For a h
 
 ### Render (Blueprint — free testing stack)
 
-The repo ships a [`render.yaml`](../render.yaml) Blueprint configured for **$0 testing**. In the Render dashboard: **New + → Blueprint → select this repo**. Render reads `render.yaml` and creates:
+The repo ships a [`render.yaml`](../render.yaml) Blueprint configured for **$0 testing** (API + bridge only — no frontend/dashboard). In the Render dashboard: **New + → Blueprint → select this repo**. Render reads `render.yaml` and creates:
 
 | Resource | Type | Root dir | Plan | Notes |
 |---|---|---|---|---|
@@ -50,9 +50,8 @@ The repo ships a [`render.yaml`](../render.yaml) Blueprint configured for **$0 t
 | `voicebot-kv` | Key Value (Redis) | — | free | internal-only |
 | `voicebot-api` | web (docker) | `services/api` | free | migrations on boot; `/healthz` |
 | `voicebot-bridge` | web (docker) | `services/bridge` | free | cold-starts after idle |
-| `voicebot-frontend` | web (docker) | `frontend` | free | nginx SPA |
 
-**Why no worker?** Render background workers have **no free tier** (Starter starts at ~$7/mo). Outbound campaign dialing is disabled on this free stack; inbound/demo via the bridge still works.
+**Why no frontend / worker?** Frontend is omitted for telephony/API testing. Render background workers have **no free tier** (Starter ~$7/mo), so outbound campaign dialing is disabled on this free stack; inbound/demo via the bridge still works.
 
 **Free-tier trade-offs** (fine for testing, not live Tata traffic):
 
@@ -61,12 +60,10 @@ The repo ships a [`render.yaml`](../render.yaml) Blueprint configured for **$0 t
 
 How it wires together:
 
-- **Secrets are prompted once.** Everything marked `sync: false` (`OPENAI_API_KEY`, `TATA_*`, `VITE_API_URL`, `FRONTEND_PUBLIC_URL`) is asked for during Blueprint creation. `SERVICE_TOKEN`, `JWT_SECRET`, and `ADMIN_PASSWORD` are auto-generated — grab the admin password from the dashboard.
-- For a first free deploy you can leave Tata secrets blank / dummy and set `OPENAI_API_KEY` only.
+- **Secrets are prompted once.** Only `OPENAI_API_KEY`, `TATA_WEBHOOK_SECRET`, and `TATA_STREAMING_AUTH_TOKEN` are `sync: false`. Tata values can be placeholders (`test`) for now. `SERVICE_TOKEN`, `JWT_SECRET`, and `ADMIN_PASSWORD` are auto-generated — grab the admin password from the api Environment tab.
 - **Managed Postgres/Redis are auto-linked** via `fromDatabase` / `fromService`. The api normalizes Render's `postgresql://` string to `+asyncpg` (see `services/api/app/config.py`).
-- **`$PORT` binding**: api/bridge pin `PORT` to `8000`/`8080` so the private URL `http://voicebot-api:8000` is stable; frontend nginx uses Render's injected `$PORT`.
-- **Two-pass secrets**: deploy once, then set `VITE_API_URL` to the api's `https://….onrender.com` URL (rebuilds frontend) and `FRONTEND_PUBLIC_URL` to the frontend URL (CORS).
-- `mock_telephony` is excluded — local only.
+- **`$PORT` binding**: api/bridge pin `PORT` to `8000`/`8080` so the private URL `http://voicebot-api:8000` is stable.
+- `mock_telephony` and the dashboard frontend are excluded — local / later add-ons only.
 
 **Upgrade path (when you can pay):** change `plan: free` → `plan: starter` on services that must stay warm (`bridge` first), and add a worker service:
 
