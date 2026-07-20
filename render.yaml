@@ -1,19 +1,20 @@
 # =============================================================================
-# VoiceBot Platform — Render Blueprint (Infrastructure as Code)
+# VoiceBot Platform — Render Blueprint (FREE testing stack)
 #
-# One-click deploy: New + > Blueprint > pick this repo. Render provisions every
-# service below, prompts once for the `sync: false` secrets, and auto-generates
-# the shared SERVICE_TOKEN / JWT_SECRET / ADMIN_PASSWORD.
+# One-click deploy: New + > Blueprint > pick this repo.
 #
-# This is a monorepo, so each service sets `rootDir` to its own subdirectory —
-# Render builds that folder's Dockerfile with the folder as the build context.
+# This Blueprint is intentionally $0 for the testing phase:
+#   - All web services use plan: free
+#   - Free Postgres + free Key Value (Redis)
+#   - No background worker (Render workers have no free tier)
 #
-# Cost notes:
-#   - `bridge` and `worker` must stay warm (live telephony), so keep them on a
-#     paid `starter` plan (free web services spin down after inactivity).
-#   - `api` and `frontend` can be dropped to `plan: free` to save money.
-#   - The `free` Postgres plan expires after 30 days — upgrade to `basic-256mb`
-#     for anything real.
+# Trade-offs (acceptable for testing, not for live telephony):
+#   - Free web services spin down after ~15 min idle → cold start ~30–60s
+#   - Outbound campaigns won't dial (no worker). Dashboard / API / bridge still work.
+#   - Free Postgres is deleted after 30 days — export before then.
+#
+# When you're ready for paid/production: change plan: free → starter on the
+# services you need warm, and add the worker block back (see docs/deployment.md).
 # =============================================================================
 
 envVarGroups:
@@ -25,28 +26,23 @@ envVarGroups:
         value: INFO
       - key: TZ
         value: Asia/Kolkata
-      # Shared internal auth between api <-> bridge <-> worker. One generated
-      # value, referenced by all three services so they always match.
       - key: SERVICE_TOKEN
         generateValue: true
 
 databases:
   - name: voicebot-db
-    plan: free # upgrade to basic-256mb for production (free expires in 30 days)
+    plan: free
     region: singapore
     postgresMajorVersion: "16"
-    ipAllowList: [] # internal connections only
+    ipAllowList: []
 
 services:
-  # ---------------------------------------------------------------------------
-  # Redis / Key Value — live-transcript pub-sub + worker queue state
-  # ---------------------------------------------------------------------------
   - type: keyvalue
     name: voicebot-kv
     plan: free
     region: singapore
     maxmemoryPolicy: noeviction
-    ipAllowList: [] # internal connections only
+    ipAllowList: []
 
   # ---------------------------------------------------------------------------
   # API — REST, auth, webhooks, dashboard WS. Runs DB migrations on boot.
@@ -56,12 +52,12 @@ services:
     runtime: docker
     rootDir: services/api
     region: singapore
-    plan: starter
+    plan: free
     healthCheckPath: /healthz
     envVars:
       - fromGroup: voicebot-shared
       - key: PORT
-        value: "8000" # entrypoint binds ${PORT}; fixed so the internal URL is stable
+        value: "8000"
       - key: DATABASE_URL
         fromDatabase:
           name: voicebot-db
@@ -76,23 +72,21 @@ services:
       - key: ADMIN_USERNAME
         value: admin
       - key: ADMIN_PASSWORD
-        generateValue: true # check the dashboard for the value, then rotate
+        generateValue: true
       - key: TATA_WEBHOOK_SECRET
         sync: false
       - key: FRONTEND_PUBLIC_URL
-        sync: false # your frontend's public https URL (for CORS)
+        sync: false
 
   # ---------------------------------------------------------------------------
-  # Bridge — Tata WSS audio <-> OpenAI Realtime. Long-lived WebSockets.
-  # Public port serves the audio stream; the 9090 metrics port stays internal.
+  # Bridge — OpenAI Realtime audio. Free tier will cold-start; fine for demos.
   # ---------------------------------------------------------------------------
   - type: web
     name: voicebot-bridge
     runtime: docker
     rootDir: services/bridge
     region: singapore
-    plan: starter
-    # Override the Dockerfile CMD to bind Render's $PORT (shell for expansion).
+    plan: free
     dockerCommand: sh -c "uvicorn app.main:app --host 0.0.0.0 --port $PORT --ws-ping-interval 20 --ws-ping-timeout 20 --log-config app/log_config.json"
     envVars:
       - fromGroup: voicebot-shared
@@ -117,43 +111,15 @@ services:
         value: "true"
 
   # ---------------------------------------------------------------------------
-  # Worker — campaign dialer. Background process, no public port.
-  # ---------------------------------------------------------------------------
-  - type: worker
-    name: voicebot-worker
-    runtime: docker
-    rootDir: services/worker
-    region: singapore
-    plan: starter
-    envVars:
-      - fromGroup: voicebot-shared
-      - key: API_INTERNAL_URL
-        value: http://voicebot-api:8000
-      - key: REDIS_URL
-        fromService:
-          type: keyvalue
-          name: voicebot-kv
-          property: connectionString
-      - key: TATA_API_KEY
-        sync: false
-      - key: TATA_OUTBOUND_CALLER_ID
-        sync: false
-      # Public wss URL Tata dials for the audio stream, e.g.
-      # wss://voicebot-bridge-xxxx.onrender.com/v1/telephony/tata
-      - key: BRIDGE_PUBLIC_WS_URL
-        sync: false
-
-  # ---------------------------------------------------------------------------
-  # Frontend — Vite SPA served by nginx (binds $PORT via the image's template).
-  # VITE_API_URL is baked at build time, so set it to the api's public URL.
+  # Frontend — Vite SPA (nginx). Rebuild after setting VITE_API_URL.
   # ---------------------------------------------------------------------------
   - type: web
     name: voicebot-frontend
     runtime: docker
     rootDir: frontend
     region: singapore
-    plan: starter
+    plan: free
     healthCheckPath: /
     envVars:
       - key: VITE_API_URL
-        sync: false # your api's public https URL, e.g. https://voicebot-api-xxxx.onrender.com
+        sync: false

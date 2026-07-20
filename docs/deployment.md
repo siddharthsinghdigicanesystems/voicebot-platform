@@ -40,26 +40,59 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 Caddy is the only container that should publish host ports (`80`/`443`). For a hardened deploy, drop the `ports:` blocks for `api`, `bridge`, and `frontend` from `docker-compose.yml` (or override them) so those services are reachable only on the internal compose network, and restrict `443` inbound on the telephony path to Tata's published egress CIDRs.
 
-### Render (Blueprint — recommended)
+### Render (Blueprint — free testing stack)
 
-The repo ships a [`render.yaml`](../render.yaml) Blueprint that provisions the whole stack in one step. In the Render dashboard: **New + → Blueprint → select this repo**. Render reads `render.yaml` and creates:
+The repo ships a [`render.yaml`](../render.yaml) Blueprint configured for **$0 testing**. In the Render dashboard: **New + → Blueprint → select this repo**. Render reads `render.yaml` and creates:
 
-| Resource | Type | Root dir | Notes |
-|---|---|---|---|
-| `voicebot-db` | Postgres | — | `free` plan (upgrade to `basic-256mb`; free expires in 30 days) |
-| `voicebot-kv` | Key Value (Redis) | — | internal-only (`ipAllowList: []`) |
-| `voicebot-api` | web (docker) | `services/api` | runs migrations on boot; `/healthz` |
-| `voicebot-bridge` | web (docker) | `services/bridge` | Tata WSS audio; `9090` metrics stays private |
-| `voicebot-worker` | worker (docker) | `services/worker` | background dialer, no public port |
-| `voicebot-frontend` | web (docker) | `frontend` | nginx SPA |
+| Resource | Type | Root dir | Plan | Notes |
+|---|---|---|---|---|
+| `voicebot-db` | Postgres | — | free | deleted after 30 days — export before then |
+| `voicebot-kv` | Key Value (Redis) | — | free | internal-only |
+| `voicebot-api` | web (docker) | `services/api` | free | migrations on boot; `/healthz` |
+| `voicebot-bridge` | web (docker) | `services/bridge` | free | cold-starts after idle |
+| `voicebot-frontend` | web (docker) | `frontend` | free | nginx SPA |
+
+**Why no worker?** Render background workers have **no free tier** (Starter starts at ~$7/mo). Outbound campaign dialing is disabled on this free stack; inbound/demo via the bridge still works.
+
+**Free-tier trade-offs** (fine for testing, not live Tata traffic):
+
+- Free web services **spin down after ~15 min idle**; the next request cold-starts in ~30–60s (breaks long-lived WSS until warm).
+- Free Postgres is **hard-deleted after 30 days**.
 
 How it wires together:
 
-- **Secrets are prompted once.** Everything marked `sync: false` (`OPENAI_API_KEY`, `TATA_*`, `VITE_API_URL`, `FRONTEND_PUBLIC_URL`, `BRIDGE_PUBLIC_WS_URL`) is asked for during Blueprint creation. `SERVICE_TOKEN`, `JWT_SECRET`, and `ADMIN_PASSWORD` are auto-generated (`generateValue`) — grab the admin password from the dashboard and rotate it.
-- **Managed Postgres/Redis are auto-linked** via `fromDatabase` / `fromService`. The api normalizes Render's `postgresql://` string to the async `+asyncpg` driver automatically (see `services/api/app/config.py`).
-- **`$PORT` binding**: Render injects `PORT`. The api's entrypoint and the bridge's `dockerCommand` bind it; the frontend's nginx binds it via the image's `envsubst` template. `PORT` is pinned to `8000`/`8080` for the api/bridge so the private-network URL `http://voicebot-api:8000` is stable.
-- **Two-pass secrets**: on first deploy you won't yet know the public URLs. Deploy once, then set `VITE_API_URL` (→ api's `onrender.com` URL, triggers a frontend rebuild), `FRONTEND_PUBLIC_URL` (→ frontend URL, for CORS), and `BRIDGE_PUBLIC_WS_URL` (→ `wss://<bridge>.onrender.com/v1/telephony/tata`).
-- `mock_telephony` is intentionally excluded — it's a local dev demo only.
+- **Secrets are prompted once.** Everything marked `sync: false` (`OPENAI_API_KEY`, `TATA_*`, `VITE_API_URL`, `FRONTEND_PUBLIC_URL`) is asked for during Blueprint creation. `SERVICE_TOKEN`, `JWT_SECRET`, and `ADMIN_PASSWORD` are auto-generated — grab the admin password from the dashboard.
+- For a first free deploy you can leave Tata secrets blank / dummy and set `OPENAI_API_KEY` only.
+- **Managed Postgres/Redis are auto-linked** via `fromDatabase` / `fromService`. The api normalizes Render's `postgresql://` string to `+asyncpg` (see `services/api/app/config.py`).
+- **`$PORT` binding**: api/bridge pin `PORT` to `8000`/`8080` so the private URL `http://voicebot-api:8000` is stable; frontend nginx uses Render's injected `$PORT`.
+- **Two-pass secrets**: deploy once, then set `VITE_API_URL` to the api's `https://….onrender.com` URL (rebuilds frontend) and `FRONTEND_PUBLIC_URL` to the frontend URL (CORS).
+- `mock_telephony` is excluded — local only.
+
+**Upgrade path (when you can pay):** change `plan: free` → `plan: starter` on services that must stay warm (`bridge` first), and add a worker service:
+
+```yaml
+  - type: worker
+    name: voicebot-worker
+    runtime: docker
+    rootDir: services/worker
+    region: singapore
+    plan: starter   # no free tier
+    envVars:
+      - fromGroup: voicebot-shared
+      - key: API_INTERNAL_URL
+        value: http://voicebot-api:8000
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: voicebot-kv
+          property: connectionString
+      - key: TATA_API_KEY
+        sync: false
+      - key: TATA_OUTBOUND_CALLER_ID
+        sync: false
+      - key: BRIDGE_PUBLIC_WS_URL
+        sync: false
+```
 
 ### Railway (monorepo)
 
