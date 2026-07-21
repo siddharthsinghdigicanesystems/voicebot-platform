@@ -13,6 +13,7 @@ __pycache__/
 htmlcov/
 .tox/
 .venv/
+.venv-test/
 venv/
 env/
 

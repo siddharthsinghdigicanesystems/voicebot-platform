@@ -72,9 +72,13 @@ class Customer(Base):
     phone: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False)
     email: Mapped[str | None] = mapped_column(String(255))
     account_status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
+    # Hospital mock-CRM fields (optional; null/0 for non-patient records).
+    patient_mrn: Mapped[str | None] = mapped_column(String(40), unique=True, index=True)
+    outstanding_balance: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
 
     appointments: Mapped[list["Appointment"]] = relationship(back_populates="customer")
+    lab_results: Mapped[list["LabResult"]] = relationship(back_populates="customer")
 
 
 class Appointment(Base):
@@ -87,11 +91,45 @@ class Appointment(Base):
     )
     service: Mapped[str] = mapped_column(String(80), nullable=False)
     scheduled_for: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    # scheduled | confirmed | cancelled | completed | no_show
+    status: Mapped[str] = mapped_column(String(32), default="scheduled", nullable=False, index=True)
+    doctor: Mapped[str | None] = mapped_column(String(120))
+    department: Mapped[str | None] = mapped_column(String(80))
+    location: Mapped[str | None] = mapped_column(String(120))
     notes: Mapped[str | None] = mapped_column(Text)
     source_call_id: Mapped[str | None] = mapped_column(String(64), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
 
     customer: Mapped[Customer] = relationship(back_populates="appointments")
+
+
+class LabResult(Base):
+    """Dummy lab / diagnostics status for hospital reception demos.
+
+    The voice bot only reports readiness / delivery — never detailed clinical
+    values. `result_summary` is a short non-diagnostic phrase for tools/UI.
+    """
+
+    __tablename__ = "lab_results"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    result_id: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
+    customer_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("customers.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    test_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    # pending | processing | ready | sent
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False, index=True)
+    result_summary: Mapped[str | None] = mapped_column(String(255))
+    eta_ready_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # email | sms | pickup | None
+    delivered_via: Mapped[str | None] = mapped_column(String(40))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime)
+    ordered_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    customer: Mapped[Customer] = relationship(back_populates="lab_results")
 
 
 # ---------------------------------------------------------------------------

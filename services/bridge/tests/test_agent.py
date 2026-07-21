@@ -14,7 +14,11 @@ def test_tool_schemas_have_required_fields() -> None:
     names = {t["name"] for t in TOOL_SCHEMAS}
     assert names == {
         "lookup_customer",
+        "confirm_appointment",
+        "cancel_appointment",
+        "reschedule_appointment",
         "schedule_appointment",
+        "lookup_test_results",
         "transfer_to_human",
         "end_call",
     }
@@ -29,7 +33,7 @@ def test_tool_schemas_have_required_fields() -> None:
 
 def test_inbound_prompt_contains_inbound_flow() -> None:
     p = build_system_prompt(CallDirection.INBOUND)
-    assert "Greet the caller" in p
+    assert "Greet warmly" in p
     assert "lookup_customer" in p
 
 
@@ -66,7 +70,14 @@ def test_prompt_contains_critical_guardrails() -> None:
 def test_brand_is_substituted() -> None:
     p = build_system_prompt(CallDirection.INBOUND, brand="Globex")
     assert "Globex" in p
-    assert "Acme Health" not in p
+    assert "CityCare Hospital" not in p
+
+
+def test_default_brand_is_citycare() -> None:
+    p = build_system_prompt(CallDirection.INBOUND)
+    assert "CityCare Hospital" in p
+    assert "lookup_test_results" in p
+    assert "confirm_appointment" in p
 
 
 def test_hinglish_prompt_uses_hinglish_flow() -> None:
@@ -86,8 +97,8 @@ def test_hindi_prompt_uses_hindi_flow() -> None:
 
 def test_unknown_language_falls_back_to_english() -> None:
     p = build_system_prompt(CallDirection.INBOUND, language="klingon")
-    # English flow contains "Greet the caller"; Hinglish/Hindi don't.
-    assert "Greet the caller" in p
+    # English flow contains "Greet warmly"; Hinglish/Hindi don't.
+    assert "Greet warmly" in p
 
 
 def test_language_aliases_resolve() -> None:

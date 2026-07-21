@@ -88,7 +88,7 @@ export function CampaignsPage() {
             className="input mt-1"
             value={brand}
             onChange={(e) => setBrand(e.target.value)}
-            placeholder="Acme Health"
+            placeholder="CityCare Hospital"
           />
         </div>
         <div>

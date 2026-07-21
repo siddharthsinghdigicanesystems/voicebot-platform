@@ -178,7 +178,7 @@ class Session:
         # and merge into the bridge defaults: NULL fields ⇒ default. A 404
         # (contact gone) silently falls back too — never fail a live call on
         # a config lookup.
-        bot_brand: str = "Acme Health"
+        bot_brand: str = "CityCare Hospital"
         bot_language: str = "en"
         bot_voice: str = settings.openai_voice
         bot_prompt_override: str | None = None

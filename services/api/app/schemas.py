@@ -49,7 +49,11 @@ class CustomerOut(BaseModel):
     phone: str
     email: str | None = None
     account_status: str
+    patient_mrn: str | None = None
+    outstanding_balance: float = 0.0
     next_appointment: dict[str, Any] | None = None
+    appointments: list[dict[str, Any]] = Field(default_factory=list)
+    lab_results: list[dict[str, Any]] = Field(default_factory=list)
     recent_orders: list[dict[str, Any]] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
@@ -58,6 +62,16 @@ class CustomerOut(BaseModel):
 class AppointmentIn(BaseModel):
     customer_id: str
     service: str
+    date: str  # YYYY-MM-DD
+    time: str  # HH:MM (24h)
+    doctor: str | None = None
+    department: str | None = None
+    location: str | None = None
+    notes: str | None = None
+    source_call_id: str | None = None
+
+
+class AppointmentRescheduleIn(BaseModel):
     date: str  # YYYY-MM-DD
     time: str  # HH:MM (24h)
     notes: str | None = None
@@ -70,8 +84,28 @@ class AppointmentOut(BaseModel):
     customer_id: str
     service: str
     scheduled_for: datetime
+    status: str = "scheduled"
+    doctor: str | None = None
+    department: str | None = None
+    location: str | None = None
     notes: str | None = None
     source_call_id: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LabResultOut(BaseModel):
+    id: str
+    result_id: str
+    customer_id: str
+    test_name: str
+    status: str
+    result_summary: str | None = None
+    eta_ready_at: datetime | None = None
+    delivered_via: str | None = None
+    delivered_at: datetime | None = None
+    ordered_at: datetime
+    notes: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

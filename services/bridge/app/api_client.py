@@ -90,6 +90,30 @@ class ApiClient:
     async def create_appointment(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._request("POST", "/v1/crm/appointments", json=payload)
 
+    async def confirm_appointment(self, confirmation_id: str) -> dict[str, Any]:
+        return await self._request(
+            "POST", f"/v1/crm/appointments/{confirmation_id}/confirm"
+        )
+
+    async def cancel_appointment(self, confirmation_id: str) -> dict[str, Any]:
+        return await self._request(
+            "POST", f"/v1/crm/appointments/{confirmation_id}/cancel"
+        )
+
+    async def reschedule_appointment(
+        self, confirmation_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            f"/v1/crm/appointments/{confirmation_id}/reschedule",
+            json=payload,
+        )
+
+    async def list_lab_results(self, customer_id: str) -> list[dict[str, Any]]:
+        return await self._request(
+            "GET", f"/v1/crm/customers/{customer_id}/lab-results"
+        )
+
     # --- Persistence (used by session lifecycle) -----------------------------
 
     async def call_started(self, payload: dict[str, Any]) -> dict[str, Any]:
